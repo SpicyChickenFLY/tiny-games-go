@@ -1,8 +1,8 @@
 package game2048
 
 import (
-	"log"
-	"os"
+	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/mattn/go-runewidth"
@@ -10,7 +10,7 @@ import (
 )
 
 var colorMap = []termbox.Attribute{
-	termbox.ColorRed,
+	termbox.ColorWhite,
 	termbox.ColorRed,
 	termbox.ColorYellow,
 	termbox.ColorGreen,
@@ -57,15 +57,15 @@ func listenToInput(inputCh chan int) {
 		case termbox.EventKey:
 			switch ev.Key {
 			case termbox.KeyArrowLeft:
-				inputCh <- KeyLeft
+				inputCh <- keyLeft
 			case termbox.KeyArrowDown:
-				inputCh <- KeyDown
+				inputCh <- keyDown
 			case termbox.KeyArrowRight:
-				inputCh <- KeyRight
+				inputCh <- keyRight
 			case termbox.KeyArrowUp:
-				inputCh <- KeyUp
+				inputCh <- keyUp
 			case termbox.KeyEsc:
-				inputCh <- KeyEsc
+				inputCh <- keyEsc
 			}
 		case termbox.EventError:
 			panic(ev.Err)
@@ -81,8 +81,7 @@ func recordLog(logCh chan string) {
 
 func render(board []int, height, width, score, fps int) {
 	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
-		log.Fatal(err)
-		os.Exit(0)
+		panic(err)
 	}
 	tbprint(0, 0, termbox.ColorWhite, termbox.ColorBlack, "")
 	for i := 0; i < height; i++ {
@@ -91,8 +90,7 @@ func render(board []int, height, width, score, fps int) {
 		}
 	}
 	if err := termbox.Flush(); err != nil {
-		log.Fatal(err)
-		os.Exit(0)
+		panic(err)
 	}
 	time.Sleep(time.Duration(1000/fps) * time.Millisecond)
 }
@@ -105,7 +103,14 @@ func tbprint(x, y int, fg, bg termbox.Attribute, msg string) {
 	}
 }
 
+// Run is the entrance of game 2048 in cmd
 func Run(name string, width int, height int, difficult int) {
+	rand.Seed(time.Now().UnixNano())
+	if err := termbox.Init(); err != nil {
+		panic(err)
+	}
+	defer termbox.Close()
+
 	// log.SetOutput(os.Stdout)
 	// log.SetLevel(log.InfoLevel)
 
@@ -116,5 +121,6 @@ func Run(name string, width int, height int, difficult int) {
 	go recordLog(logChannel)
 
 	game := Game{}
-	game.run(name, width, height, difficult, inputChannel, logChannel, render)
+	score := game.run(name, width, height, difficult, inputChannel, logChannel, render)
+	fmt.Println("your final socre is: ", score)
 }
