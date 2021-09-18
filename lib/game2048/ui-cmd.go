@@ -83,11 +83,17 @@ func render(board []int, height, width, score, fps int) {
 	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 		panic(err)
 	}
-	tbprint(0, 0, termbox.ColorWhite, termbox.ColorBlack, "")
+	tbprint(0, 0, termbox.ColorDefault, termbox.ColorDefault, fmt.Sprintf("score:%d", score))
+	tbprint(0, 1, termbox.ColorDefault, termbox.ColorDefault, "=====================================")
+
+	tbprint(0, 3, termbox.ColorDefault, termbox.ColorDefault, "-------------------------")
 	for i := 0; i < height; i++ {
+		tbprint(0, i*2+4, termbox.ColorDefault, termbox.ColorDefault, "|")
 		for j := 0; j < width; j++ {
-			tbprint(6*j+1, i+1, colorMap[board[i*width+j]], termbox.ColorBlack, strMap[board[i*width+j]])
+			tbprint(6*j+1, i*2+4, colorMap[board[i*width+j]], termbox.ColorBlack, strMap[board[i*width+j]])
+			tbprint(6*j+6, i*2+4, termbox.ColorDefault, termbox.ColorDefault, "|")
 		}
+		tbprint(0, i*2+5, termbox.ColorDefault, termbox.ColorDefault, "-------------------------")
 	}
 	if err := termbox.Flush(); err != nil {
 		panic(err)

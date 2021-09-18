@@ -64,6 +64,7 @@ func (g *Game) init(w, h, difficult int) {
 }
 
 func (g *Game) moveOrMergeElement(pos, direction int) {
+	g.lastMoveValid = false
 	newPos := pos + direction
 
 	if g.board[pos] == emptyElement || !g.checkBorderAfterMove(pos, direction) {
@@ -73,7 +74,7 @@ func (g *Game) moveOrMergeElement(pos, direction int) {
 
 	if g.board[newPos] == g.board[pos] { // can be merged
 		// fmt.Printf("merge:%d->%d\n", pos, newPos)
-		// g.Score += g.board[pos]
+		g.score += g.board[pos]
 		g.board[newPos]++                  // promote the target element
 		g.board[newPos] = -g.board[newPos] // mark the target not be merged again
 		g.board[pos] = emptyElement
@@ -128,7 +129,7 @@ func (g *Game) operate(direction int) {
 }
 
 func (g *Game) checkAlive() {
-	if !g.lastMoveValid || g.boardFree > 0 { // if not valid (never move or merge this turn), end for next operation
+	if g.boardFree > 0 { // if not valid (never move or merge this turn), end for next operation
 		g.alive = true
 	} else {
 		for pos := 0; pos < len(g.board)-1; pos++ { // we ignore the last element
@@ -140,7 +141,6 @@ func (g *Game) checkAlive() {
 		}
 		g.alive = false
 	}
-	g.lastMoveValid = false
 }
 
 func (g *Game) checkBorderAfterMove(pos, direction int) bool {
