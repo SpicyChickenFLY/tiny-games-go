@@ -64,8 +64,7 @@ func (g *Game) init(w, h, difficult int) {
 }
 
 func (g *Game) moveOrMergeElement(pos, direction int) {
-	g.lastMoveValid = false
-	newPos := pos + direction
+	newPos := afterMove(pos, direction)
 
 	if g.board[pos] == emptyElement || !g.checkBorderAfterMove(pos, direction) {
 		// fmt.Printf("%d cant be moved/merged to %d\n", pos, newPos)
@@ -73,7 +72,7 @@ func (g *Game) moveOrMergeElement(pos, direction int) {
 	}
 
 	if g.board[newPos] == g.board[pos] { // can be merged
-		// fmt.Printf("merge:%d->%d\n", pos, newPos)
+		g.score += g.board[pos]
 		g.score += g.board[pos]
 		g.board[newPos]++                  // promote the target element
 		g.board[newPos] = -g.board[newPos] // mark the target not be merged again
@@ -83,16 +82,16 @@ func (g *Game) moveOrMergeElement(pos, direction int) {
 	}
 
 	if g.board[newPos] == emptyElement { // can be moved
-		// fmt.Printf("move:%d->%d\n", pos, newPos)
 		g.board[newPos] = g.board[pos] // assign the target element
 		g.board[pos] = emptyElement
 		g.moveOrMergeElement(newPos, direction) // (iteration)
 		g.lastMoveValid = true
 	}
-
 }
 
 func (g *Game) operate(direction int) {
+	g.lastMoveValid = false
+
 	// first loop: move or merge
 	if direction == g.up || direction == g.left {
 		// fmt.Printf("direction:%d, normal traverse\n", direction)
@@ -118,8 +117,8 @@ func (g *Game) operate(direction int) {
 			if newNumIndexCountDown == 0 { // the free pos will be assign for new number
 				g.board[pos] = rand.Intn(g.difficult) + 1 // rand.Intn range from [0,n) while we need [1,n], so plus 1
 				g.boardFree--                             // free space decreased because of the new number
-				newNumIndexCountDown = -1                 // make count down negatively to avoid generating another new number
-			} else if newNumIndexCountDown > 0 { // wait for next free pos
+			}
+			if newNumIndexCountDown >= 0 { // wait for next free pos
 				newNumIndexCountDown--
 			}
 		}
