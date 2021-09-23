@@ -122,6 +122,7 @@ func (g *Game) checkLanded() bool {
 			return false
 		}
 	}
+	g.tetriminoY++
 	return true
 }
 
@@ -138,8 +139,6 @@ func (g *Game) hardDrop() {
 	g.hardDropFlag = true
 }
 
-func (g *Game) accelerate() {}
-
 // get from bag system (A 1.2.1)
 func (g *Game) genFromBag() {
 	if g.bagIdx == len(g.bag) {
@@ -155,9 +154,9 @@ func (g *Game) genFromBag() {
 	}
 	g.tetriminoIdx = g.bag[g.bagIdx]
 	if g.bagIdx == len(g.bag)-1 {
-		g.nextTetriminoIdx = tetriminoShapes[g.nextBag[0]][0]
+		g.nextTetriminoIdx = g.nextBag[0]
 	} else {
-		g.nextTetriminoIdx = tetriminoShapes[g.bag[g.bagIdx+1]][0]
+		g.nextTetriminoIdx = g.bag[g.bagIdx+1]
 	}
 }
 
@@ -201,9 +200,6 @@ func (g *Game) fallingPhase() {
 			}
 		}
 	}
-
-	g.tetriminoY--
-
 	g.lockPhase()
 }
 
