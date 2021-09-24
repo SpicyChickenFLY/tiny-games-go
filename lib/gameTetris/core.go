@@ -9,6 +9,8 @@ import (
 const (
 	emptyTile = 0
 	tetriNum  = 4
+	rowEmpty  = -2
+	rowFull   = -1
 )
 
 // operation type (Chapter 4)
@@ -43,9 +45,9 @@ var tetriminoShapes = [][]int{
 type Game struct {
 	playfield                                     []int
 	height, bufferHeight, width                   int
-	stash                                         []int
 	bag, nextBag                                  []int
 	bagIdx                                        int
+	stash                                         []int
 	tetriminoX, tetriminoY, tetriminoSize         int
 	tetriminoIdx, tetriminoDrct, nextTetriminoIdx int
 	ghostX, ghostY                                int
@@ -53,15 +55,24 @@ type Game struct {
 	fallSpeed                                     float64
 	lockDelay                                     int
 	score, difficult, lockDownDelay               int
-	alive                                         bool
-	hardDropFlag, softDropFlag                    bool
-	movedFlag, spaceFlag, landFlag                bool
-	patternMatchFlag                              bool
-	allowSRS, allowGhost, allowHardDropOp         bool
-	inputCh                                       chan int
+	comboCounter                                  int
+	dropLine                                      int
+
+	// internal judge flag
+	hardDropFlag, softDropFlag    bool
+	moveFlag, spaceFlag, landFlag bool
+	patternMatchFlag              bool
+	tSpinFlag, backToBackFlag     bool
+
+	// game optional enable flag
+	allowSRS, allowGhost, allowHardDropOp               bool
+	allowLockDownPeek, allowAboveSkyline, allowForcedUp bool
+	allowTopOut, allowLockOut, allowBlockOut            bool
+	// io utils
+	inputCh chan int
 }
 
-// ============== Main Progress ================
+// ============== Utils ====================
 
 func (g *Game) init(w, h, difficult int) {
 	rand.Seed(time.Now().UnixNano())
@@ -71,7 +82,7 @@ func (g *Game) init(w, h, difficult int) {
 	g.width, g.height, g.bufferHeight = w, h, h
 	g.playfield = make([]int, g.width*(g.height+g.bufferHeight))
 	g.calcFallSpeed()
-
+	g.comboCounter = -1
 }
 
 func (g *Game) calcPosOnBoard(posOnShape int) (x, y int) {
@@ -80,6 +91,71 @@ func (g *Game) calcPosOnBoard(posOnShape int) (x, y int) {
 	return x, y
 }
 
+// calculate the fall speed in current level (unit: Millisecond Per Line)
+func (g *Game) calcFallSpeed() {
+	g.fallSpeed = math.Pow(0.8-float64(g.level-1)*0.007, float64(g.level-1)) * 1000
+}
+
+// calculate the soft drop speed in current level (unit: Millisecond Per Line)
+func (g *Game) calcDropSpeed() {
+	g.calcFallSpeed()
+	g.fallSpeed = g.fallSpeed / 20
+}
+
+// get from bag system (A 1.2.1)
+func (g *Game) genFromBag() {
+	if g.bagIdx == len(g.bag) {
+		for i := 0; i < len(tetriminoShapes); i++ {
+			g.bag = append(g.bag, i)
+		}
+		rand.Shuffle(
+			len(g.bag),
+			func(i, j int) {
+				g.bag[i], g.bag[j] = g.bag[j], g.bag[i]
+			})
+		g.bagIdx = 0
+	}
+	g.tetriminoIdx = g.bag[g.bagIdx]
+	if g.bagIdx == len(g.bag)-1 {
+		g.nextTetriminoIdx = g.nextBag[0]
+	} else {
+		g.nextTetriminoIdx = g.bag[g.bagIdx+1]
+	}
+}
+
+func (g *Game) checkLanded() bool {
+	g.tetriminoY--
+	for i := tetriminoShapes[g.tetriminoIdx][g.tetriminoDrct]; i != 0; i >>= 4 {
+		x, y := g.calcPosOnBoard(i)
+		if g.playfield[x+y*g.width] != 0 {
+			g.tetriminoY++
+			return false
+		}
+	}
+	g.tetriminoY++
+	return true
+}
+
+func (g *Game) processInput() {
+	for input := range g.inputCh {
+		switch input {
+		case moveLeft:
+			g.move(true)
+		case moveRight:
+			g.move(false)
+		case rotateClockwise:
+			g.rotate(true)
+		case rotateCounterClockwise:
+			g.rotate(false)
+		case softDrop:
+			g.softDrop()
+		case hardDrop:
+			g.hardDropFlag = true
+		}
+	}
+}
+
+// =============== Basic Operation =================
 func (g *Game) move(isDrctLeft bool) {
 	if isDrctLeft {
 		g.tetriminoX--
@@ -109,22 +185,7 @@ func (g *Game) rotate(isClockwise bool) {
 
 func (g *Game) classiscRotate(isClockwise bool) {}
 
-func (g *Game) superRotate(isClockwise bool) {
-
-}
-
-func (g *Game) checkLanded() bool {
-	g.tetriminoY--
-	for i := tetriminoShapes[g.tetriminoIdx][g.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := g.calcPosOnBoard(i)
-		if g.playfield[x+y*g.width] != 0 {
-			g.tetriminoY++
-			return false
-		}
-	}
-	g.tetriminoY++
-	return true
-}
+func (g *Game) superRotate(isClockwise bool) {}
 
 func (g *Game) softDrop() {
 	if g.softDropFlag {
@@ -139,29 +200,11 @@ func (g *Game) hardDrop() {
 	g.hardDropFlag = true
 }
 
-// get from bag system (A 1.2.1)
-func (g *Game) genFromBag() {
-	if g.bagIdx == len(g.bag) {
-		for i := 0; i < len(tetriminoShapes); i++ {
-			g.bag = append(g.bag, i)
-		}
-		rand.Shuffle(
-			len(g.bag),
-			func(i, j int) {
-				g.bag[i], g.bag[j] = g.bag[j], g.bag[i]
-			})
-		g.bagIdx = 0
-	}
-	g.tetriminoIdx = g.bag[g.bagIdx]
-	if g.bagIdx == len(g.bag)-1 {
-		g.nextTetriminoIdx = g.nextBag[0]
-	} else {
-		g.nextTetriminoIdx = g.bag[g.bagIdx+1]
-	}
-}
+// ============ Running Flowchart ================
 
 // generration Phase (A 1.2.1)
-func (g *Game) generationPhase() {
+// return value is the gameOverFlag
+func (g *Game) generationPhase() bool {
 	// Random Generation
 	g.genFromBag()
 	// Generation of Tetriminos
@@ -171,26 +214,8 @@ func (g *Game) generationPhase() {
 	g.tetriminoY = g.height + 1
 }
 
-func (g *Game) processInput() {
-	for input := range g.inputCh {
-		switch input {
-		case moveLeft:
-			g.move(true)
-		case moveRight:
-			g.move(false)
-		case rotateClockwise:
-			g.rotate(true)
-		case rotateCounterClockwise:
-			g.rotate(false)
-		case softDrop:
-			g.softDrop()
-		case hardDrop:
-			g.hardDropFlag = true
-		}
-	}
-}
-
 func (g *Game) fallingPhase() {
+	// FIXME: should not block in here
 	if !g.checkLanded() {
 		startTime, endTime := time.Now(), time.Now()
 		for endTime.Sub(startTime) < time.Duration(g.fallSpeed)*time.Millisecond {
@@ -203,7 +228,10 @@ func (g *Game) fallingPhase() {
 	g.lockPhase()
 }
 
+//
+// return value is the gameOverFlag
 func (g *Game) lockPhase() {
+	// FIXME: should not block in here
 	startTime, endTime := time.Now(), time.Now()
 	for endTime.Sub(startTime) < time.Duration(g.lockDownDelay)*time.Millisecond {
 		g.processInput()
@@ -211,7 +239,7 @@ func (g *Game) lockPhase() {
 			return
 		}
 	}
-	if g.movedFlag {
+	if g.moveFlag {
 		if g.spaceFlag {
 			g.fallingPhase()
 		} else if g.landFlag {
@@ -221,43 +249,59 @@ func (g *Game) lockPhase() {
 }
 
 func (g *Game) patternPhase() {
-	if g.patternMatchFlag {
-		// Mark Block for Destruction
+	g.patternMatchFlag = false
+	for i := 0; i < len(g.playfield); i++ {
+		// TODO: judge T-spin
+		count := g.width
+		if i%g.width == 0 {
+			if count == 0 {
+				g.patternMatchFlag = true
+				g.playfield[i-g.width] = rowFull
+			} else if count == g.width {
+				g.playfield[i-g.width] = rowEmpty
+				return // above this line is all empty
+			}
+			count = g.width
+		}
+		if g.playfield[i] > 0 {
+			count--
+		}
 	}
-	g.iteratePhase()
 }
 
-func (g *Game) iteratePhase() {
+// this phase is for more variants and is not used for now
+func (g *Game) iteratePhase() {}
 
-}
-
+// this phase consumes no apparent game time
 func (g *Game) animatePhase() {}
 
-func (g *Game) detectLineClear() bool {
-	return false // FIXEME: not done
-}
-
 func (g *Game) elimatePhase() {
-	if g.detectLineClear() {
-		g.elimatePhase()
+	clearLineCount := 0
+	for rowIdx := 0; rowIdx < g.height+g.bufferHeight; rowIdx++ {
+		rowHeaderPos := rowIdx * g.width
+		if g.playfield[rowHeaderPos] == rowFull {
+			clearLineCount++
+		} else if g.playfield[rowHeaderPos] == rowEmpty {
+			return // no need to move empty line
+		} else if clearLineCount > 0 {
+			for colIdx := rowHeaderPos; colIdx < rowHeaderPos+g.width; colIdx++ {
+				g.playfield[colIdx] = g.playfield[colIdx-clearLineCount*g.width]
+			}
+		}
 	}
-	g.completionPhase()
+	// TODO: Game Statistics
+
 }
 
-func (g *Game) completionPhase() {}
-
-// calculate the fall speed in current level (unit: Millisecond Per Line)
-func (g *Game) calcFallSpeed() {
-	g.fallSpeed = math.Pow(0.8-float64(g.level-1)*0.007, float64(g.level-1)) * 1000
-}
-
-func (g *Game) calcDropSpeed() {
-	g.calcFallSpeed()
-	g.fallSpeed = g.fallSpeed / 20
+func (g *Game) completionPhase() {
+	// update information
+	// level up condition
 }
 
 // Run the game
-func (g *Game) Run() {
+// Game Over condition occurs in Generation Phase and Lock Phase
+func (g *Game) Run(w, h, difficult int) {
+	g.init(w, h, difficult)
 	// Tetris engine flowchart
 	for true {
 		g.generationPhase()
@@ -266,10 +310,10 @@ func (g *Game) Run() {
 			if g.hardDropFlag && !g.allowHardDropOp {
 				break
 			}
-			for g.movedFlag && !g.spaceFlag && g.landFlag {
+			for g.moveFlag && !g.spaceFlag && g.landFlag {
 				g.lockPhase()
 			}
-			if !g.movedFlag || (g.movedFlag && !g.spaceFlag && !g.landFlag) {
+			if !g.moveFlag || (g.moveFlag && !g.spaceFlag && !g.landFlag) {
 				break
 			}
 		}
@@ -279,9 +323,10 @@ func (g *Game) Run() {
 		}
 		g.iteratePhase()
 		g.animatePhase()
-		for g.detectLineClear() {
-			g.elimatePhase()
-		}
+		g.elimatePhase()
 		g.completionPhase()
 	}
+
+	// Game Over Events
+
 }

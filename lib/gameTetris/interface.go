@@ -34,7 +34,7 @@ func run(
 	g Game,
 	width, height, difficult int,
 	inputChannel chan int,
-	renderFunc func(board []int, height, width, score, fps int),
+	renderFunc func(playfield []int, height, width, score, fps int),
 ) (score int) {
 	g.init(4, 4, 2)
 
