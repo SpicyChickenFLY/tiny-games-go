@@ -14,10 +14,22 @@ const (
 )
 
 const (
-	defaultDifficulty   = 1
-	defaultHeight       = 20
-	defaultBufferHeight = 20
-	defaultWidth        = 10
+	defaultScore                   = 0
+	defaultDifficulty              = 1
+	defaultLockDownDelay           = 500
+	defaultHeight                  = 20
+	defaultBufferHeight            = 20
+	defaultWidth                   = 10
+	defaultDropSpeedRatio          = 20
+	defaultAllowSRS                = true
+	defaultAllowGhost              = true
+	defaultAllowHardDropOp         = false
+	defaultAllowLockDownPeek       = true
+	defaultAllowPlayAboveSkyline   = true
+	defaultAllowForcedAboveSkyline = true
+	defaultAllowTopOut             = false // for now, this must be false
+	defaultAllowLockOut            = false
+	defaultAllowBlockOut           = false // for now, this must be false
 )
 
 // operation type (Chapter 4)
@@ -50,49 +62,71 @@ var tetriminoShapes = [][]int{
 
 // GameManager implement GameManager interface
 type GameManager struct {
+	// game optional variables(can be modified before game start)
+	difficulty, lockDownDelay                  int
+	height, bufferHeight, width, stashQueueCap int
+	dropSpeedRatio                             float64
+	allowSRS, allowGhost, allowHardDropOp      bool
+	allowLockDownPeek, allowPlayAboveSkyline   bool
+	allowForcedAboveSkyline                    bool
+	allowTopOut, allowLockOut, allowBlockOut   bool
+
+	// game internal variables(can not be modified by user)
 	playfield                                     []int
-	height, bufferHeight, width                   int
 	bag, nextBag                                  []int
-	bagIdx                                        int
-	stash                                         []int
-	tetriminoX, tetriminoY, tetriminoSize         int
+	stashQueue                                    []int
+	tetriminoX, tetriminoY, ghostX, ghostY        int
+	tetriminoSpawnX, tetriminoSpawnY              int
 	tetriminoIdx, tetriminoDrct, nextTetriminoIdx int
-	ghostX, ghostY                                int
-	level                                         int
+	score, level, bagIdx, comboCounter, dropLine  int
 	fallSpeed                                     float64
-	lockDelay                                     int
-	score, difficulty, lockDownDelay              int
-	comboCounter                                  int
-	dropLine                                      int
+	hardDropFlag, softDropFlag                    bool
+	moveFlag, landFlag, lockDownTimerResetFlag    bool
+	patternMatchFlag, tSpinFlag, backToBackFlag   bool
 
-	// internal judge flag
-	hardDropFlag, softDropFlag    bool
-	moveFlag, spaceFlag, landFlag bool
-	patternMatchFlag              bool
-	tSpinFlag, backToBackFlag     bool
-
-	// game optional enable flag
-	allowSRS, allowGhost, allowHardDropOp               bool
-	allowLockDownPeek, allowAboveSkyline, allowForcedUp bool
-	allowTopOut, allowLockOut, allowBlockOut            bool
 	// io utils
-	inputCh chan int
+	inputCh  chan int
+	renderer func(gm *GameManager)
 }
 
+// NewGameManager return *GameManager
 func NewGameManager() *GameManager {
-	return &GameManager{}
+	return &GameManager{
+		difficulty:              defaultDifficulty,
+		lockDownDelay:           defaultLockDownDelay,
+		height:                  defaultHeight,
+		bufferHeight:            defaultBufferHeight,
+		width:                   defaultWidth,
+		dropSpeedRatio:          defaultDropSpeedRatio,
+		allowSRS:                defaultAllowSRS,
+		allowGhost:              defaultAllowGhost,
+		allowHardDropOp:         defaultAllowHardDropOp,
+		allowLockDownPeek:       defaultAllowLockDownPeek,
+		allowPlayAboveSkyline:   defaultAllowPlayAboveSkyline,
+		allowForcedAboveSkyline: defaultAllowForcedAboveSkyline,
+		allowTopOut:             defaultAllowTopOut,
+		allowLockOut:            defaultAllowLockOut,
+		allowBlockOut:           defaultAllowBlockOut,
+	}
 }
 
-// ============== Utils ====================
+// ================ Utils ====================
 
-func (gm *GameManager) init() {
+func (gm *GameManager) reload() {
 	rand.Seed(time.Now().UnixNano())
-	gm.score = 0
-	gm.difficulty, gm.level = defaultDifficulty, defaultDifficulty
-	gm.width, gm.height, gm.bufferHeight = defaultWidth, defaultHeight, defaultBufferHeight
 	gm.playfield = make([]int, gm.width*(gm.height+gm.bufferHeight))
-	gm.calcFallSpeed()
+	gm.tetriminoSpawnX = (gm.width - tetriNum) / 2
+	gm.tetriminoSpawnY = gm.height
+	gm.bag = make([]int, len(tetriminoShapes))
+	gm.nextBag = make([]int, len(tetriminoShapes))
+	gm.bagIdx = len(gm.bag)
+	gm.useBagSystem()
+	gm.stashQueue = make([]int, gm.stashQueueCap)
+	gm.score = defaultScore
+	gm.level = gm.difficulty
 	gm.comboCounter = -1
+	gm.dropLine = 0
+	gm.calcFallSpeed()
 }
 
 func (gm *GameManager) calcPosOnBoard(posOnShape int) (x, y int) {
@@ -101,31 +135,39 @@ func (gm *GameManager) calcPosOnBoard(posOnShape int) (x, y int) {
 	return x, y
 }
 
+// calculate the ghost postion
+func (gm *GameManager) calcGhost() {
+	//
+	// gm.ghostX
+	// gm.ghostX
+	gm.checkLanding()
+}
+
 // calculate the fall speed in current level (unit: Millisecond Per Line)
 func (gm *GameManager) calcFallSpeed() {
+	// TODO: can we modify these ratio?
 	gm.fallSpeed = math.Pow(0.8-float64(gm.level-1)*0.007, float64(gm.level-1)) * 1000
 }
 
 // calculate the soft drop speed in current level (unit: Millisecond Per Line)
 func (gm *GameManager) calcDropSpeed() {
 	gm.calcFallSpeed()
-	gm.fallSpeed = gm.fallSpeed / 20
+	gm.fallSpeed = gm.fallSpeed / gm.dropSpeedRatio
 }
 
 // get from bag system (A 1.2.1)
-func (gm *GameManager) genFromBag() {
+func (gm *GameManager) useBagSystem() {
 	if gm.bagIdx == len(gm.bag) {
-		for i := 0; i < len(tetriminoShapes); i++ {
-			gm.bag = append(gm.bag, i)
-		}
+		copy(gm.bag, gm.nextBag)
 		rand.Shuffle(
-			len(gm.bag),
+			len(gm.nextBag),
 			func(i, j int) {
-				gm.bag[i], gm.bag[j] = gm.bag[j], gm.bag[i]
+				gm.nextBag[i], gm.nextBag[j] = gm.nextBag[j], gm.nextBag[i]
 			})
 		gm.bagIdx = 0
 	}
 	gm.tetriminoIdx = gm.bag[gm.bagIdx]
+
 	if gm.bagIdx == len(gm.bag)-1 {
 		gm.nextTetriminoIdx = gm.nextBag[0]
 	} else {
@@ -133,28 +175,38 @@ func (gm *GameManager) genFromBag() {
 	}
 }
 
-func (gm *GameManager) checkCollision() bool {
+func (gm *GameManager) checkBorderX(x int) bool {
+	return x >= 0 && x < gm.width
+}
+
+func (gm *GameManager) checkBorderY(y int) bool {
+	return y >= 0 && y < gm.height+gm.bufferHeight
+}
+
+func (gm *GameManager) checkNoCollision() bool {
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
 		x, y := gm.calcPosOnBoard(i)
-		if gm.playfield[x+y*gm.width] != 0 {
+		if gm.checkBorderX(x) && gm.checkBorderY(y) && gm.playfield[x+y*gm.width] != 0 {
 			return false
 		}
 	}
-	return false //
+	return false
 }
 
-func (gm *GameManager) checkLanding() bool {
+func (gm *GameManager) checkLanding() {
 	gm.tetriminoY--
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
 		x, y := gm.calcPosOnBoard(i)
-		if y >= 0 && gm.playfield[x+y*gm.width] != 0 {
+		if y <= 0 || gm.playfield[x+y*gm.width] != 0 {
 			gm.tetriminoY++
-			return false
+			gm.landFlag = true
 		}
 	}
 	gm.tetriminoY++
-	return true
+	gm.landFlag = false
 }
+
+// =================== IO ========================
 
 func (gm *GameManager) processInput() {
 	for input := range gm.inputCh {
@@ -172,7 +224,12 @@ func (gm *GameManager) processInput() {
 		case hardDrop:
 			gm.hardDropFlag = true
 		}
+		gm.renderOutput()
 	}
+}
+
+func (gm *GameManager) renderOutput() {
+	gm.renderer(gm)
 }
 
 // =============== Basic Operation =================
@@ -183,8 +240,7 @@ func (gm *GameManager) move(isDrctLeft bool) {
 		gm.tetriminoX++
 	}
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := gm.calcPosOnBoard(i)
-		if x < 0 || x >= gm.width || gm.playfield[x+y*gm.width] != 0 {
+		if !gm.checkNoCollision() {
 			if isDrctLeft {
 				gm.tetriminoX++
 			} else {
@@ -193,6 +249,7 @@ func (gm *GameManager) move(isDrctLeft bool) {
 			return
 		}
 	}
+	gm.moveFlag = true
 }
 
 func (gm *GameManager) rotate(isClockwise bool) {
@@ -205,7 +262,9 @@ func (gm *GameManager) rotate(isClockwise bool) {
 
 func (gm *GameManager) classiscRotate(isClockwise bool) {}
 
-func (gm *GameManager) superRotate(isClockwise bool) {}
+func (gm *GameManager) superRotate(isClockwise bool) {
+	// set lockDownTimerResetFlag
+}
 
 func (gm *GameManager) softDrop() {
 	if gm.softDropFlag {
@@ -213,6 +272,7 @@ func (gm *GameManager) softDrop() {
 	} else {
 		gm.calcDropSpeed()
 	}
+	gm.softDropFlag = !gm.softDropFlag
 }
 
 func (gm *GameManager) hardDrop() {
@@ -222,46 +282,55 @@ func (gm *GameManager) hardDrop() {
 
 // ============ Running Flowchart ================
 
-// generration Phase (A 1.2.1)
-// return value is the gameOverFlag
+// Generration Phase (A 1.2.1)
 func (gm *GameManager) generationPhase() bool {
-	// Random Generation
-	gm.genFromBag()
-	// Generation of Tetriminos
-	// TODO: delay time?
+	// Random Generation of Tetriminos
+	gm.useBagSystem()
 	// Starting Location and Orirntation
-	gm.tetriminoX = (gm.width - tetriNum) / 2
-	gm.tetriminoY = gm.height + 1
-	return gm.checkCollision()
+	gm.tetriminoX = gm.tetriminoSpawnX
+	gm.tetriminoY = gm.tetriminoSpawnY
+	gm.tetriminoDrct = 0
+	gm.calcGhost()
+	gm.renderOutput()
+	return gm.checkNoCollision() || gm.allowBlockOut
 }
 
 func (gm *GameManager) fallingPhase() {
-	// FIXME: should not block in here
-	if !gm.checkLanding() {
+	gm.checkLanding()
+	if !gm.landFlag {
+		gm.hardDropFlag = false
 		startTime, endTime := time.Now(), time.Now()
 		for endTime.Sub(startTime) < time.Duration(gm.fallSpeed)*time.Millisecond {
 			gm.processInput()
 			if gm.hardDropFlag && !gm.allowHardDropOp {
 				return
 			}
+			endTime = time.Now()
 		}
+		gm.renderOutput()
 	}
 }
 
-//
-// return value is the gameOverFlag
+// Lock Phase (A 1.2.1)
 func (gm *GameManager) lockPhase() bool {
-	// FIXME: should not block in here
 	startTime, endTime := time.Now(), time.Now()
-	for endTime.Sub(startTime) < time.Duration(gm.lockDownDelay)*time.Millisecond {
-		gm.processInput()
-		if gm.hardDropFlag && !gm.allowHardDropOp {
-			return gm.checkCollision()
+	for !gm.hardDropFlag || gm.allowHardDropOp {
+		if endTime.Sub(startTime) >= time.Duration(gm.lockDownDelay)*time.Millisecond {
+			break
 		}
+		gm.processInput()
+		if !gm.moveFlag || !gm.landFlag || !gm.lockDownTimerResetFlag {
+			break
+		}
+		if gm.moveFlag && gm.landFlag && gm.lockDownTimerResetFlag {
+			startTime = time.Now()
+		}
+		endTime = time.Now()
 	}
-	return gm.checkCollision()
+	return gm.checkNoCollision() || gm.allowLockOut
 }
 
+// Pattern Phase (A 1.2.1)
 func (gm *GameManager) patternPhase() {
 	gm.patternMatchFlag = false
 	for i := 0; i < len(gm.playfield); i++ {
@@ -283,10 +352,10 @@ func (gm *GameManager) patternPhase() {
 	}
 }
 
-// this phase is for more variants and is not used for now
+// this phase is for more variants (not used for now)
 func (gm *GameManager) iteratePhase() {}
 
-// this phase consumes no apparent game time
+// this phase consumes no apparent game time (gm.renderOutput())
 func (gm *GameManager) animatePhase() {}
 
 func (gm *GameManager) elimatePhase() {
@@ -304,6 +373,8 @@ func (gm *GameManager) elimatePhase() {
 		}
 	}
 	// TODO: GameManager Statistics
+
+	gm.renderOutput()
 }
 
 func (gm *GameManager) completionPhase() {
@@ -314,24 +385,13 @@ func (gm *GameManager) completionPhase() {
 // Tetris engine flowchart
 func (gm *GameManager) loopFlow() {
 	for gm.generationPhase() {
-		for true {
+		for gm.moveFlag && !gm.landFlag {
 			gm.fallingPhase()
-			if (gm.hardDropFlag && !gm.allowHardDropOp) ||
-				(gm.moveFlag && !gm.spaceFlag && !gm.landFlag) ||
-				!gm.moveFlag {
-				break
+			if !gm.lockPhase() {
+				return
 			}
-			for gm.moveFlag && !gm.spaceFlag && gm.landFlag {
-				if !gm.lockPhase() {
-					return
-				}
-			}
-
 		}
 		gm.patternPhase()
-		if gm.patternMatchFlag {
-			// Mark block for destruction
-		}
 		gm.iteratePhase()
 		gm.animatePhase()
 		gm.elimatePhase()
@@ -341,17 +401,23 @@ func (gm *GameManager) loopFlow() {
 
 // ============= Export Function ===============
 
-func (gm *GameManager) GetSetups() {
-
-}
+// GetSetups of game manager
+func (gm *GameManager) GetSetups() {}
 
 // Setup game optional settings
 func (gm *GameManager) Setup() {}
 
+// RestoreDefaultSetup for game manager
+func (gm *GameManager) RestoreDefaultSetup() {}
+
+// NewGame recall initialization
+func (gm *GameManager) NewGame() {
+}
+
 // Run the game
 // GameManager Over condition occurs in Generation Phase and Lock Phase
 func (gm *GameManager) Run() {
-	gm.init()
+	gm.reload()
 	// Tetris engine flowchart
 	gm.loopFlow()
 	// GameManager Over Events
