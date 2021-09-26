@@ -177,6 +177,13 @@ func (gm *GameManager) useBagSystem() {
 	}
 }
 
+func (gm *GameManager) lockDown() {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+		x, y := gm.calcPosOnBoard(i)
+		gm.playfield[x+y*gm.width] = gm.tetriminoIdx
+	}
+}
+
 func (gm *GameManager) checkBorderX(x int) bool {
 	return x >= 0 && x < gm.width
 }
@@ -199,9 +206,10 @@ func (gm *GameManager) checkLanding() {
 	gm.tetriminoY--
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
 		x, y := gm.calcPosOnBoard(i)
-		if y <= 0 || gm.playfield[x+y*gm.width] != 0 {
+		if y < 0 || gm.playfield[x+y*gm.width] != 0 {
 			gm.tetriminoY++
 			gm.landFlag = true
+			return
 		}
 	}
 	gm.tetriminoY++
@@ -314,7 +322,7 @@ func (gm *GameManager) generationPhase() bool {
 
 func (gm *GameManager) fallingPhase() {
 	gm.checkLanding()
-	if !gm.landFlag {
+	for !gm.landFlag {
 		gm.hardDropFlag = false
 		startTime, endTime := time.Now(), time.Now()
 		for endTime.Sub(startTime) < time.Duration(gm.fallSpeed)*time.Millisecond {
@@ -324,8 +332,9 @@ func (gm *GameManager) fallingPhase() {
 			}
 			endTime = time.Now()
 		}
-		gm.tetriminoY++
+		gm.tetriminoY--
 		gm.renderOutput()
+		gm.checkLanding()
 	}
 }
 
@@ -337,14 +346,16 @@ func (gm *GameManager) lockPhase() bool {
 			break
 		}
 		gm.processInput()
-		if !gm.moveFlag || !gm.landFlag || !gm.lockDownTimerResetFlag {
-			break
-		}
 		if gm.moveFlag && gm.landFlag && gm.lockDownTimerResetFlag {
 			startTime = time.Now()
 		}
 		endTime = time.Now()
 	}
+	if gm.moveFlag && !gm.landFlag {
+		return true
+	}
+	gm.lockDown() // Lock down this tetrimino
+	// panic("lock down")
 	return gm.checkNoCollision() || gm.allowLockOut
 }
 
