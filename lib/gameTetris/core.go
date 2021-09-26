@@ -86,11 +86,11 @@ type GameManager struct {
 
 	// io utils
 	inputCh  chan int
-	renderer func(gm *GameManager)
+	renderer func(playfield []int, height, width int)
 }
 
 // NewGameManager return *GameManager
-func NewGameManager() *GameManager {
+func NewGameManager(inputCh chan int, renderer func(playfield []int, height, width int)) *GameManager {
 	return &GameManager{
 		difficulty:              defaultDifficulty,
 		lockDownDelay:           defaultLockDownDelay,
@@ -107,6 +107,8 @@ func NewGameManager() *GameManager {
 		allowTopOut:             defaultAllowTopOut,
 		allowLockOut:            defaultAllowLockOut,
 		allowBlockOut:           defaultAllowBlockOut,
+		inputCh:                 inputCh,
+		renderer:                renderer,
 	}
 }
 
@@ -190,7 +192,7 @@ func (gm *GameManager) checkNoCollision() bool {
 			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (gm *GameManager) checkLanding() {
@@ -209,7 +211,8 @@ func (gm *GameManager) checkLanding() {
 // =================== IO ========================
 
 func (gm *GameManager) processInput() {
-	for input := range gm.inputCh {
+	select {
+	case input := <-gm.inputCh:
 		switch input {
 		case moveLeft:
 			gm.move(true)
@@ -224,12 +227,25 @@ func (gm *GameManager) processInput() {
 		case hardDrop:
 			gm.hardDropFlag = true
 		}
-		gm.renderOutput()
+	default:
+
 	}
+	gm.renderOutput()
+
 }
 
 func (gm *GameManager) renderOutput() {
-	gm.renderer(gm)
+	playfield := make([]int, gm.width*gm.height)
+	for i := 0; i < len(playfield); i++ {
+		playfield[i] = gm.playfield[i]
+	}
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+		x, y := gm.calcPosOnBoard(i)
+		if x+y*gm.width < len(playfield) {
+			playfield[x+y*gm.width] = 1
+		}
+	}
+	gm.renderer(playfield, gm.height, gm.width)
 }
 
 // =============== Basic Operation =================
@@ -291,6 +307,7 @@ func (gm *GameManager) generationPhase() bool {
 	gm.tetriminoY = gm.tetriminoSpawnY
 	gm.tetriminoDrct = 0
 	gm.calcGhost()
+	gm.moveFlag = true
 	gm.renderOutput()
 	return gm.checkNoCollision() || gm.allowBlockOut
 }
@@ -307,6 +324,7 @@ func (gm *GameManager) fallingPhase() {
 			}
 			endTime = time.Now()
 		}
+		gm.tetriminoY++
 		gm.renderOutput()
 	}
 }
@@ -340,7 +358,7 @@ func (gm *GameManager) patternPhase() {
 			if count == 0 {
 				gm.patternMatchFlag = true
 				gm.playfield[i-gm.width] = rowFull
-			} else if count == gm.width {
+			} else if count == gm.width && i > 0 {
 				gm.playfield[i-gm.width] = rowEmpty
 				return // above this line is all empty
 			}
@@ -410,13 +428,9 @@ func (gm *GameManager) Setup() {}
 // RestoreDefaultSetup for game manager
 func (gm *GameManager) RestoreDefaultSetup() {}
 
-// NewGame recall initialization
-func (gm *GameManager) NewGame() {
-}
-
-// Run the game
+// NewGame start for caller
 // GameManager Over condition occurs in Generation Phase and Lock Phase
-func (gm *GameManager) Run() {
+func (gm *GameManager) NewGame() {
 	gm.reload()
 	// Tetris engine flowchart
 	gm.loopFlow()

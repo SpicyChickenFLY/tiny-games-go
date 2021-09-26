@@ -3,62 +3,78 @@ package gameTetris
 import (
 	"fmt"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/nsf/termbox-go"
 )
 
-const (
-	keyEsc = 0
+var colorMap = []termbox.Attribute{
+	termbox.ColorWhite,
+	termbox.ColorRed,
+	termbox.ColorYellow,
+	termbox.ColorGreen,
+	termbox.ColorCyan,
+	termbox.ColorBlue,
+	termbox.ColorMagenta,
+	termbox.ColorDarkGray,
+}
 
-	keyUp    = 1
-	keyDown  = 2
-	keyLeft  = 4
-	keyRight = 8
-)
-
-func renderFrame(
-	g Game,
-	renderFunc func(board []int, height, width, score, fps int),
-	stopCh <-chan struct{}) {
-
+//  =================== Utils ===================
+func ListenToInput(inputCh chan int) {
+	termbox.SetInputMode(termbox.InputEsc)
 	for {
-		select {
-		case <-stopCh:
-			return
-		default:
-			renderFunc(g.board, g.height, g.width, g.score, g.fps)
+		switch ev := termbox.PollEvent(); ev.Type {
+		case termbox.EventKey:
+			switch ev.Key {
+			case termbox.KeyArrowLeft:
+				inputCh <- moveLeft
+
+			case termbox.KeyArrowRight:
+				inputCh <- moveRight
+			case termbox.KeyArrowUp:
+				inputCh <- rotateClockwise
+			case termbox.KeyArrowDown:
+				inputCh <- softDrop
+			case termbox.KeySpace:
+				inputCh <- hardDrop
+
+			case termbox.KeyEsc:
+				panic("bye")
+			}
+			switch ev.Ch {
+			case 'x':
+				inputCh <- rotateClockwise
+			case 'z':
+				inputCh <- rotateCounterClockwise
+			}
+
+		case termbox.EventError:
+			panic(ev.Err)
 		}
 	}
 }
 
-func run(
-	g Game,
-	width, height, difficult int,
-	inputChannel chan int,
-	renderFunc func(playfield []int, height, width, score, fps int),
-) (score int) {
-	g.init(4, 4, 2)
-
-	stopRenderCh := make(chan struct{})
-	go render(g, renderFunc, stopRenderCh)
-	defer close(stopRenderCh)
-
-	process(g, inputChannel)
-
-	return g.score
-}
-
-// Run is the entrance of game 2048 in cmd
-func Run(name string, width int, height int, difficult int) {
-	if err := termbox.Init(); err != nil {
+func RenderToScreen(playfield []int, height, width int) {
+	counter := 0
+	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 		panic(err)
 	}
-	defer termbox.Close()
+	for i := 0; i < height; i++ {
+		for j := 0; j < width; j++ {
+			tbprint(width-j, height-i, termbox.ColorRed, termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
+		}
 
-	inputChannel := make(chan int, 5)
-	go listenToInput(inputChannel)
+	}
+	tbprint(30, 1, termbox.ColorRed, termbox.ColorDefault, fmt.Sprint(counter))
+	if err := termbox.Flush(); err != nil {
+		panic(err)
+	}
+	counter++
+}
 
-	game := Game{}
-
-	score := run(game, width, height, difficult, inputChannel, renderToScreen)
-	fmt.Println("your final socre is: ", score)
+// This function is often useful:
+func tbprint(x, y int, fg, bg termbox.Attribute, msg string) {
+	for _, c := range msg {
+		termbox.SetCell(x, y, c, fg, bg)
+		x += runewidth.RuneWidth(c)
+	}
 }
