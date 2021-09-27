@@ -70,7 +70,7 @@ var tetriminoShapes = [7][4]int{
 	{0x6510, 0x9652, 0xA954, 0x8541}, // Z-tetrimino
 }
 
-var tSpinCheckShape = 0xA820
+var tSpinCheckMino = 0x8A20
 
 const kickWallTableTestCaseNum = 5
 
@@ -123,9 +123,9 @@ type GameManager struct {
 	tetriminoIdx, tetriminoDrct, nextTetriminoIdx        int
 	score, level, bagIdx, comboCounter, dropLine, lastOp int
 	fallSpeed                                            float64
-	hardDropFlag, softDropFlag                           bool
-	moveFlag, landFlag, lockDownTimerResetFlag           bool
-	patternMatchFlag, tSpinFlag, backToBackFlag          bool
+	hardDropFlag, softDropFlag, moveFlag                 bool
+	landFlag, lockDownTimerResetFlag, patternMatchFlag   bool
+	tSpinFlag, miniSpinFlag, backToBackFlag              bool
 
 	// io utils
 	inputCh  chan int
@@ -202,7 +202,7 @@ func (gm *GameManager) useBagSystem() {
 }
 
 func (gm *GameManager) lockDown() {
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 		x, y := gm.calcMinoPosOnBoard(i)
 		gm.playfield[x+y*gm.width] = gm.tetriminoIdx + 1
 	}
@@ -229,7 +229,7 @@ func (gm *GameManager) calcGhostPos() {
 	}
 	for true {
 		gm.ghostY--
-		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 			x, y := gm.calcGhostMinoPosOnBoard(i)
 			if y < 0 || gm.playfield[x+y*gm.width] != 0 {
 				gm.ghostY++
@@ -259,7 +259,7 @@ func (gm *GameManager) checkBorderY(y int) bool {
 }
 
 func (gm *GameManager) checkNoCollision() bool {
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 		x, y := gm.calcMinoPosOnBoard(i)
 		if gm.checkBorderX(x) && gm.checkBorderY(y) && gm.playfield[x+y*gm.width] != 0 {
 			return false
@@ -274,7 +274,7 @@ func (gm *GameManager) checkLockOut() bool {
 
 func (gm *GameManager) checkLanding() {
 	gm.tetriminoY--
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 		x, y := gm.calcMinoPosOnBoard(i)
 		if y < 0 || gm.playfield[x+y*gm.width] != 0 {
 			gm.tetriminoY++
@@ -287,7 +287,30 @@ func (gm *GameManager) checkLanding() {
 }
 
 func (gm *GameManager) checkTSpin() {
-
+	gm.tSpinFlag, gm.miniSpinFlag = false, false
+	if gm.tetriminoIdx != tetriminoShapeT ||
+		(gm.lastOp != rotateClockwise &&
+			gm.lastOp != rotateCounterClockwise) {
+		return
+	}
+	blockedCount := 0
+	for i := tSpinCheckMino; i != 0; i >>= tetriNum {
+		x, y := gm.calcMinoPosOnBoard(i)
+		if !gm.checkBorderX(x) || !gm.checkBorderY(y) || gm.playfield[x+y*gm.width] != 0 {
+			blockedCount |= 1
+		}
+		blockedCount <<= 1
+	}
+	blockedCount &= blockedCount >> 12
+	if blockedCount >= 3 {
+		gm.tSpinFlag = true
+	}
+	for i := 0; i < gm.tetriminoDrct; i++ {
+		blockedCount
+	}
+	if blockedCount == 4 || true {
+		gm.miniSpinFlag = true
+	}
 }
 
 // =============== Basic Operation =================
@@ -297,7 +320,7 @@ func (gm *GameManager) move(opCode int) {
 	} else {
 		gm.tetriminoX++
 	}
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 		x, y := gm.calcMinoPosOnBoard(i)
 		if !gm.checkBorderX(x) || !gm.checkBorderY(y) || gm.playfield[x+y*gm.width] != 0 {
 			if opCode == moveLeft {
@@ -350,7 +373,7 @@ func (gm *GameManager) rotate(opCode int) {
 		testCase := testCases[srcDrct*2+directionOffset][i]
 		offsetX, offsetY := testCase[0], testCase[1]
 		blockFlag := false
-		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 			x, y := gm.calcMinoPosOnBoard(i)
 			x += offsetX
 			y += offsetY
@@ -508,6 +531,12 @@ func (gm *GameManager) elimatePhase() {
 	}
 	// TODO: GameManager Statistics
 
+	// Reset Back-to-Back flag
+	if clearLineCount == 4 || gm.tSpinFlag {
+		gm.backToBackFlag = true
+	} else if clearLineCount > 0 {
+		gm.backToBackFlag = false
+	}
 	gm.renderOutput()
 }
 
@@ -560,7 +589,7 @@ func (gm *GameManager) renderOutput() {
 	for i := 0; i < len(playfield); i++ {
 		playfield[i] = gm.playfield[i]
 	}
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 		x, y := gm.calcGhostMinoPosOnBoard(i)
 		if x+y*gm.width < len(playfield) {
 			playfield[x+y*gm.width] = (gm.tetriminoIdx + 1) * -1
@@ -570,9 +599,14 @@ func (gm *GameManager) renderOutput() {
 			playfield[x+y*gm.width] = gm.tetriminoIdx + 1
 		}
 	}
-	// nextTetrimin := make([][]int, 1)
+	nextTetrimino := make([][]int, 1)
+	nextTetrimino[0] = make([]int, tetriNum*tetriNum)
+	for i := tetriminoShapes[gm.nextTetriminoIdx][0]; i != 0; i >>= tetriNum {
 
-	gm.renderer(playfield, gm.height, gm.width, gm.score)
+		nextTetrimino[0][i&15] = gm.nextTetriminoIdx + 1
+	}
+
+	gm.renderer(playfield, nextTetrimino[0], gm.height, gm.width, gm.score)
 }
 
 // ============= Export Function ===============

@@ -69,7 +69,15 @@ func RenderToScreen(playfield, next []int, height, width, score int) {
 		}
 
 	}
-	tbprint(22, 5, termbox.ColorRed, termbox.ColorDefault, fmt.Sprintf("score: %8d", score))
+	for i := 0; i < tetriNum; i++ {
+		for j := 0; j < tetriNum; j++ {
+			// tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
+			tbprint(22+j*2, 2+i, colorMap[next[i*tetriNum+j]], termbox.ColorBlack, "⬛")
+
+		}
+
+	}
+	tbprint(22, 6, termbox.ColorRed, termbox.ColorDefault, fmt.Sprintf("score: %8d", score))
 	if err := termbox.Flush(); err != nil {
 		panic(err)
 	}
