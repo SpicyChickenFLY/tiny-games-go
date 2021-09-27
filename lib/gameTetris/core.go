@@ -43,6 +43,16 @@ const (
 	hold
 )
 
+const (
+	tetriminoShapeO = iota
+	tetriminoShapeI
+	tetriminoShapeT
+	tetriminoShapeL
+	tetriminoShapeJ
+	tetriminoShapeS
+	tetriminoShapeZ
+)
+
 // Tetrimino facings (A 1.3)
 //   _____________
 //   | 0| 1| 2| 3|
@@ -50,7 +60,7 @@ const (
 //   | 8| 9| A| B|
 //   | C| D| E| F|
 //   -------------
-var tetriminoShapes = [][]int{
+var tetriminoShapes = [7][4]int{
 	{0x6521, 0x6521, 0x6521, 0x6521}, // O-tetrimino
 	{0x7654, 0xEA62, 0xBA98, 0xD951}, // I-tetrimino
 	{0x6541, 0x9651, 0x9654, 0x9541}, // T-tetrimino
@@ -58,6 +68,39 @@ var tetriminoShapes = [][]int{
 	{0x6540, 0x9521, 0xA654, 0x9851}, // J-tetrimino
 	{0x5421, 0xA651, 0x9865, 0x9540}, // S-tetrimino
 	{0x6510, 0x9652, 0xA954, 0x8541}, // Z-tetrimino
+}
+
+var tSpinCheckShape = 0xA820
+
+const kickWallTableTestCaseNum = 5
+
+var kickWallTableForJLSTZ = [][kickWallTableTestCaseNum][2]int{
+	{{0, 0}, {-1, 0}, {-1, +1}, {0, -2}, {-1, -2}}, // 0->R
+	{{0, 0}, {+1, 0}, {+1, +1}, {0, -2}, {+1, -2}}, // 0->L
+
+	{{0, 0}, {+1, 0}, {+1, -1}, {0, +2}, {+1, +2}}, // R->2
+	{{0, 0}, {+1, 0}, {+1, -1}, {0, +2}, {+1, +2}}, // R->0
+
+	{{0, 0}, {+1, 0}, {+1, +1}, {0, -2}, {+1, -2}}, // 2->L
+	{{0, 0}, {-1, 0}, {-1, +1}, {0, -2}, {-1, -2}}, // 2->R
+
+	{{0, 0}, {-1, 0}, {-1, -1}, {0, +2}, {-1, +2}}, // L->0
+	{{0, 0}, {-1, 0}, {-1, -1}, {0, +2}, {-1, +2}}, // L->2
+}
+
+var kickWallTableForI = [][kickWallTableTestCaseNum][2]int{
+	{{0, 0}, {-2, 0}, {+1, 0}, {-2, -1}, {+1, +2}}, // 0->R
+	{{0, 0}, {-1, 0}, {+2, 0}, {-1, +2}, {+2, -1}}, // 0->L
+
+	{{0, 0}, {-1, 0}, {+2, 0}, {-1, +2}, {+2, -1}}, // R->2
+	{{0, 0}, {+2, 0}, {-1, 0}, {+2, +1}, {-1, -2}}, // R->0
+
+	{{0, 0}, {+2, 0}, {-1, 0}, {+2, +1}, {-1, -2}}, // 2->L
+	{{0, 0}, {+1, 0}, {-2, 0}, {+1, -2}, {-2, +1}}, // 2->R
+
+	{{0, 0}, {+1, 0}, {-2, 0}, {+1, -2}, {-2, +1}}, // L->0
+	{{0, 0}, {-2, 0}, {+1, 0}, {-2, -1}, {+1, +2}}, // L->2
+
 }
 
 // GameManager implement GameManager interface
@@ -72,25 +115,25 @@ type GameManager struct {
 	allowTopOut, allowLockOut, allowBlockOut   bool
 
 	// game internal variables(can not be modified by user)
-	playfield                                     []int
-	bag, nextBag                                  []int
-	stashQueue                                    []int
-	tetriminoX, tetriminoY, ghostX, ghostY        int
-	tetriminoSpawnX, tetriminoSpawnY              int
-	tetriminoIdx, tetriminoDrct, nextTetriminoIdx int
-	score, level, bagIdx, comboCounter, dropLine  int
-	fallSpeed                                     float64
-	hardDropFlag, softDropFlag                    bool
-	moveFlag, landFlag, lockDownTimerResetFlag    bool
-	patternMatchFlag, tSpinFlag, backToBackFlag   bool
+	playfield                                            []int
+	bag, nextBag                                         []int
+	stashQueue                                           []int
+	tetriminoX, tetriminoY, ghostX, ghostY               int
+	tetriminoSpawnX, tetriminoSpawnY                     int
+	tetriminoIdx, tetriminoDrct, nextTetriminoIdx        int
+	score, level, bagIdx, comboCounter, dropLine, lastOp int
+	fallSpeed                                            float64
+	hardDropFlag, softDropFlag                           bool
+	moveFlag, landFlag, lockDownTimerResetFlag           bool
+	patternMatchFlag, tSpinFlag, backToBackFlag          bool
 
 	// io utils
 	inputCh  chan int
-	renderer func(playfield []int, height, width int)
+	renderer func(playfield, next []int, height, width, score int)
 }
 
 // NewGameManager return *GameManager
-func NewGameManager(inputCh chan int, renderer func(playfield []int, height, width int)) *GameManager {
+func NewGameManager(inputCh chan int, renderer func(playfield, next []int, height, width, score int)) *GameManager {
 	return &GameManager{
 		difficulty:              defaultDifficulty,
 		lockDownDelay:           defaultLockDownDelay,
@@ -121,6 +164,9 @@ func (gm *GameManager) reload() {
 	gm.tetriminoSpawnY = gm.height
 	gm.bag = make([]int, len(tetriminoShapes))
 	gm.nextBag = make([]int, len(tetriminoShapes))
+	// use bag system twice to ensure current bag is shuffled
+	gm.bagIdx = len(gm.bag)
+	gm.useBagSystem()
 	gm.bagIdx = len(gm.bag)
 	gm.useBagSystem()
 	gm.stashQueue = make([]int, gm.stashQueueCap)
@@ -131,36 +177,14 @@ func (gm *GameManager) reload() {
 	gm.calcFallSpeed()
 }
 
-func (gm *GameManager) calcPosOnBoard(posOnShape int) (x, y int) {
-	x = gm.tetriminoX + posOnShape%tetriNum
-	y = gm.tetriminoY - posOnShape/tetriNum%tetriNum
-	return x, y
-}
-
-// calculate the ghost postion
-func (gm *GameManager) calcGhost() {
-	//
-	// gm.ghostX
-	// gm.ghostX
-	gm.checkLanding()
-}
-
-// calculate the fall speed in current level (unit: Millisecond Per Line)
-func (gm *GameManager) calcFallSpeed() {
-	// TODO: can we modify these ratio?
-	gm.fallSpeed = math.Pow(0.8-float64(gm.level-1)*0.007, float64(gm.level-1)) * 1000
-}
-
-// calculate the soft drop speed in current level (unit: Millisecond Per Line)
-func (gm *GameManager) calcDropSpeed() {
-	gm.calcFallSpeed()
-	gm.fallSpeed = gm.fallSpeed / gm.dropSpeedRatio
-}
-
 // get from bag system (A 1.2.1)
 func (gm *GameManager) useBagSystem() {
-	if gm.bagIdx == len(gm.bag) {
+	gm.bagIdx++
+	if gm.bagIdx >= len(gm.bag) {
 		copy(gm.bag, gm.nextBag)
+		for i := 0; i < len(gm.nextBag); i++ {
+			gm.nextBag[i] = i
+		}
 		rand.Shuffle(
 			len(gm.nextBag),
 			func(i, j int) {
@@ -179,11 +203,53 @@ func (gm *GameManager) useBagSystem() {
 
 func (gm *GameManager) lockDown() {
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := gm.calcPosOnBoard(i)
-		gm.playfield[x+y*gm.width] = gm.tetriminoIdx
+		x, y := gm.calcMinoPosOnBoard(i)
+		gm.playfield[x+y*gm.width] = gm.tetriminoIdx + 1
 	}
 }
 
+func (gm *GameManager) calcMinoPosOnBoard(posOnShape int) (x, y int) {
+	x = gm.tetriminoX + posOnShape%tetriNum
+	y = gm.tetriminoY - posOnShape/tetriNum%tetriNum
+	return x, y
+}
+
+func (gm *GameManager) calcGhostMinoPosOnBoard(posOnShape int) (x, y int) {
+	x = gm.ghostX + posOnShape%tetriNum
+	y = gm.ghostY - posOnShape/tetriNum%tetriNum
+	return x, y
+}
+
+func (gm *GameManager) calcGhostPos() {
+	gm.ghostX = gm.tetriminoX
+	gm.ghostY = gm.tetriminoY
+	gm.checkLanding()
+	if gm.landFlag {
+		return
+	}
+	for true {
+		gm.ghostY--
+		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+			x, y := gm.calcGhostMinoPosOnBoard(i)
+			if y < 0 || gm.playfield[x+y*gm.width] != 0 {
+				gm.ghostY++
+				return
+			}
+		}
+	}
+}
+
+// calculate the fall speed in current level (unit: Millisecond Per Line)
+func (gm *GameManager) calcFallSpeed() {
+	// TODO: can we modify these ratio?
+	gm.fallSpeed = math.Pow(0.8-float64(gm.level-1)*0.007, float64(gm.level-1)) * 1000
+}
+
+// calculate the soft drop speed in current level (unit: Millisecond Per Line)
+func (gm *GameManager) calcDropSpeed() {
+	gm.calcFallSpeed()
+	gm.fallSpeed = gm.fallSpeed / gm.dropSpeedRatio
+}
 func (gm *GameManager) checkBorderX(x int) bool {
 	return x >= 0 && x < gm.width
 }
@@ -194,7 +260,7 @@ func (gm *GameManager) checkBorderY(y int) bool {
 
 func (gm *GameManager) checkNoCollision() bool {
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := gm.calcPosOnBoard(i)
+		x, y := gm.calcMinoPosOnBoard(i)
 		if gm.checkBorderX(x) && gm.checkBorderY(y) && gm.playfield[x+y*gm.width] != 0 {
 			return false
 		}
@@ -202,10 +268,14 @@ func (gm *GameManager) checkNoCollision() bool {
 	return true
 }
 
+func (gm *GameManager) checkLockOut() bool {
+	return false
+}
+
 func (gm *GameManager) checkLanding() {
 	gm.tetriminoY--
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := gm.calcPosOnBoard(i)
+		x, y := gm.calcMinoPosOnBoard(i)
 		if y < 0 || gm.playfield[x+y*gm.width] != 0 {
 			gm.tetriminoY++
 			gm.landFlag = true
@@ -216,56 +286,21 @@ func (gm *GameManager) checkLanding() {
 	gm.landFlag = false
 }
 
-// =================== IO ========================
+func (gm *GameManager) checkTSpin() {
 
-func (gm *GameManager) processInput() {
-	select {
-	case input := <-gm.inputCh:
-		switch input {
-		case moveLeft:
-			gm.move(true)
-		case moveRight:
-			gm.move(false)
-		case rotateClockwise:
-			gm.rotate(true)
-		case rotateCounterClockwise:
-			gm.rotate(false)
-		case softDrop:
-			gm.softDrop()
-		case hardDrop:
-			gm.hardDropFlag = true
-		}
-	default:
-
-	}
-	gm.renderOutput()
-
-}
-
-func (gm *GameManager) renderOutput() {
-	playfield := make([]int, gm.width*gm.height)
-	for i := 0; i < len(playfield); i++ {
-		playfield[i] = gm.playfield[i]
-	}
-	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		x, y := gm.calcPosOnBoard(i)
-		if x+y*gm.width < len(playfield) {
-			playfield[x+y*gm.width] = 1
-		}
-	}
-	gm.renderer(playfield, gm.height, gm.width)
 }
 
 // =============== Basic Operation =================
-func (gm *GameManager) move(isDrctLeft bool) {
-	if isDrctLeft {
+func (gm *GameManager) move(opCode int) {
+	if opCode == moveLeft {
 		gm.tetriminoX--
 	} else {
 		gm.tetriminoX++
 	}
 	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
-		if !gm.checkNoCollision() {
-			if isDrctLeft {
+		x, y := gm.calcMinoPosOnBoard(i)
+		if !gm.checkBorderX(x) || !gm.checkBorderY(y) || gm.playfield[x+y*gm.width] != 0 {
+			if opCode == moveLeft {
 				gm.tetriminoX++
 			} else {
 				gm.tetriminoX--
@@ -273,21 +308,80 @@ func (gm *GameManager) move(isDrctLeft bool) {
 			return
 		}
 	}
+	gm.calcGhostPos()
+	gm.lastOp = opCode
 	gm.moveFlag = true
 }
 
-func (gm *GameManager) rotate(isClockwise bool) {
-	if gm.allowSRS {
-		gm.superRotate(isClockwise)
+func (gm *GameManager) rotate(opCode int) {
+	srcDrct := gm.tetriminoDrct
+	// Per rotate
+	if opCode == rotateClockwise {
+		gm.tetriminoDrct++
+		if gm.tetriminoDrct >= len(tetriminoShapes[gm.tetriminoIdx]) {
+			gm.tetriminoDrct = 0
+		}
 	} else {
-		gm.classiscRotate(isClockwise)
+		gm.tetriminoDrct--
+		if gm.tetriminoDrct < 0 {
+			gm.tetriminoDrct = len(tetriminoShapes[gm.tetriminoIdx]) - 1
+		}
 	}
-}
-
-func (gm *GameManager) classiscRotate(isClockwise bool) {}
-
-func (gm *GameManager) superRotate(isClockwise bool) {
-	// set lockDownTimerResetFlag
+	// check if blocked
+	var testCaseNum int
+	if gm.allowSRS {
+		testCaseNum = kickWallTableTestCaseNum
+	} else {
+		testCaseNum = 1
+	}
+	var testCases [][kickWallTableTestCaseNum][2]int
+	if gm.tetriminoIdx == tetriminoShapeI {
+		testCases = kickWallTableForI
+	} else {
+		testCases = kickWallTableForJLSTZ
+	}
+	var directionOffset int
+	if opCode == rotateClockwise {
+		directionOffset = 0
+	} else {
+		directionOffset = 1
+	}
+	for i := 0; i < testCaseNum; i++ {
+		testCase := testCases[srcDrct*2+directionOffset][i]
+		offsetX, offsetY := testCase[0], testCase[1]
+		blockFlag := false
+		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+			x, y := gm.calcMinoPosOnBoard(i)
+			x += offsetX
+			y += offsetY
+			if !gm.checkBorderX(x) || !gm.checkBorderY(y) || gm.playfield[x+y*gm.width] != 0 {
+				blockFlag = true
+				break
+			}
+		}
+		if blockFlag {
+			continue
+		}
+		// pass test case
+		gm.tetriminoX += offsetX
+		gm.tetriminoY += offsetY
+		gm.calcGhostPos()
+		gm.lastOp = opCode
+		gm.moveFlag = true
+		return
+	}
+	// not pass any case, rollback
+	if opCode != rotateClockwise {
+		gm.tetriminoDrct++
+		if gm.tetriminoDrct >= len(tetriminoShapes[gm.tetriminoIdx]) {
+			gm.tetriminoDrct = 0
+		}
+	} else {
+		gm.tetriminoDrct--
+		if gm.tetriminoDrct < 0 {
+			gm.tetriminoDrct = len(tetriminoShapes[gm.tetriminoIdx]) - 1
+		}
+	}
 }
 
 func (gm *GameManager) softDrop() {
@@ -295,11 +389,13 @@ func (gm *GameManager) softDrop() {
 		gm.calcFallSpeed()
 	} else {
 		gm.calcDropSpeed()
+		gm.lastOp = softDrop
 	}
 	gm.softDropFlag = !gm.softDropFlag
 }
 
 func (gm *GameManager) hardDrop() {
+	gm.lastOp = hardDrop
 	gm.tetriminoX, gm.tetriminoY = gm.ghostX, gm.ghostY
 	gm.hardDropFlag = true
 }
@@ -314,7 +410,7 @@ func (gm *GameManager) generationPhase() bool {
 	gm.tetriminoX = gm.tetriminoSpawnX
 	gm.tetriminoY = gm.tetriminoSpawnY
 	gm.tetriminoDrct = 0
-	gm.calcGhost()
+	gm.calcGhostPos()
 	gm.moveFlag = true
 	gm.renderOutput()
 	return gm.checkNoCollision() || gm.allowBlockOut
@@ -327,6 +423,7 @@ func (gm *GameManager) fallingPhase() {
 		startTime, endTime := time.Now(), time.Now()
 		for endTime.Sub(startTime) < time.Duration(gm.fallSpeed)*time.Millisecond {
 			gm.processInput()
+			gm.calcGhostPos()
 			if gm.hardDropFlag && !gm.allowHardDropOp {
 				return
 			}
@@ -346,6 +443,7 @@ func (gm *GameManager) lockPhase() bool {
 			break
 		}
 		gm.processInput()
+		gm.calcGhostPos()
 		if gm.moveFlag && gm.landFlag && gm.lockDownTimerResetFlag {
 			startTime = time.Now()
 		}
@@ -354,18 +452,20 @@ func (gm *GameManager) lockPhase() bool {
 	if gm.moveFlag && !gm.landFlag {
 		return true
 	}
+	if !gm.checkNoCollision() || (gm.checkLockOut() && !gm.allowLockOut) {
+		return false
+	}
 	gm.lockDown() // Lock down this tetrimino
-	// panic("lock down")
-	return gm.checkNoCollision() || gm.allowLockOut
+	return true
 }
 
 // Pattern Phase (A 1.2.1)
 func (gm *GameManager) patternPhase() {
 	gm.patternMatchFlag = false
+	count := gm.width
 	for i := 0; i < len(gm.playfield); i++ {
 		// TODO: judge T-spin
-		count := gm.width
-		if i%gm.width == 0 {
+		if i%gm.width == 0 { // row head
 			if count == 0 {
 				gm.patternMatchFlag = true
 				gm.playfield[i-gm.width] = rowFull
@@ -394,10 +494,15 @@ func (gm *GameManager) elimatePhase() {
 		if gm.playfield[rowHeaderPos] == rowFull {
 			clearLineCount++
 		} else if gm.playfield[rowHeaderPos] == rowEmpty {
-			return // no need to move empty line
-		} else if clearLineCount > 0 {
+			gm.playfield[rowHeaderPos] = 0
+			break // no need to move empty line
+		}
+		if clearLineCount > 0 {
 			for colIdx := rowHeaderPos; colIdx < rowHeaderPos+gm.width; colIdx++ {
-				gm.playfield[colIdx] = gm.playfield[colIdx-clearLineCount*gm.width]
+				gm.playfield[colIdx] = gm.playfield[colIdx+clearLineCount*gm.width]
+				if gm.playfield[colIdx] < 0 {
+					gm.playfield[colIdx] = 0
+				}
 			}
 		}
 	}
@@ -426,6 +531,48 @@ func (gm *GameManager) loopFlow() {
 		gm.elimatePhase()
 		gm.completionPhase()
 	}
+}
+
+// =================== IO ========================
+
+func (gm *GameManager) processInput() {
+	select {
+	case input := <-gm.inputCh:
+		switch input {
+		case moveLeft, moveRight:
+			gm.move(input)
+		case rotateClockwise, rotateCounterClockwise:
+			gm.rotate(input)
+		case softDrop:
+			gm.softDrop()
+		case hardDrop:
+			gm.hardDrop()
+		}
+	default:
+
+	}
+	gm.renderOutput()
+
+}
+
+func (gm *GameManager) renderOutput() {
+	playfield := make([]int, gm.width*gm.height)
+	for i := 0; i < len(playfield); i++ {
+		playfield[i] = gm.playfield[i]
+	}
+	for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= 4 {
+		x, y := gm.calcGhostMinoPosOnBoard(i)
+		if x+y*gm.width < len(playfield) {
+			playfield[x+y*gm.width] = (gm.tetriminoIdx + 1) * -1
+		}
+		x, y = gm.calcMinoPosOnBoard(i)
+		if x+y*gm.width < len(playfield) {
+			playfield[x+y*gm.width] = gm.tetriminoIdx + 1
+		}
+	}
+	// nextTetrimin := make([][]int, 1)
+
+	gm.renderer(playfield, gm.height, gm.width, gm.score)
 }
 
 // ============= Export Function ===============

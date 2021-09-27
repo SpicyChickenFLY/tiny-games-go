@@ -8,14 +8,14 @@ import (
 )
 
 var colorMap = []termbox.Attribute{
+	termbox.ColorBlack,
 	termbox.ColorWhite,
-	termbox.ColorRed,
+	termbox.ColorCyan,
+	termbox.ColorMagenta,
+	termbox.ColorBlue,
 	termbox.ColorYellow,
 	termbox.ColorGreen,
-	termbox.ColorCyan,
-	termbox.ColorBlue,
-	termbox.ColorMagenta,
-	termbox.ColorDarkGray,
+	termbox.ColorRed,
 }
 
 //  =================== Utils ===================
@@ -27,7 +27,6 @@ func ListenToInput(inputCh chan int) {
 			switch ev.Key {
 			case termbox.KeyArrowLeft:
 				inputCh <- moveLeft
-
 			case termbox.KeyArrowRight:
 				inputCh <- moveRight
 			case termbox.KeyArrowUp:
@@ -53,22 +52,27 @@ func ListenToInput(inputCh chan int) {
 	}
 }
 
-func RenderToScreen(playfield []int, height, width int) {
-	counter := 0
+func RenderToScreen(playfield, next []int, height, width, score int) {
 	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 		panic(err)
 	}
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-			tbprint(width-j, height-i, termbox.ColorRed, termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
+			if playfield[i*width+j] > 0 {
+				// tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
+				tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorBlack, "⬛")
+			} else {
+				// tbprint(j*2, height-i, termbox.ColorBlack, colorMap[playfield[i*width+j]*-1], fmt.Sprint(playfield[i*width+j]))
+				tbprint(j*2, height-i, termbox.ColorBlack, colorMap[playfield[i*width+j]*-1], "⬛")
+			}
+
 		}
 
 	}
-	tbprint(30, 1, termbox.ColorRed, termbox.ColorDefault, fmt.Sprint(counter))
+	tbprint(22, 5, termbox.ColorRed, termbox.ColorDefault, fmt.Sprintf("score: %8d", score))
 	if err := termbox.Flush(); err != nil {
 		panic(err)
 	}
-	counter++
 }
 
 // This function is often useful:
