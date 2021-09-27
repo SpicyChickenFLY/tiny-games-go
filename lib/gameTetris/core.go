@@ -115,17 +115,18 @@ type GameManager struct {
 	allowTopOut, allowLockOut, allowBlockOut   bool
 
 	// game internal variables(can not be modified by user)
-	playfield                                            []int
-	bag, nextBag                                         []int
-	stashQueue                                           []int
-	tetriminoX, tetriminoY, ghostX, ghostY               int
-	tetriminoSpawnX, tetriminoSpawnY                     int
-	tetriminoIdx, tetriminoDrct, nextTetriminoIdx        int
-	score, level, bagIdx, comboCounter, dropLine, lastOp int
-	fallSpeed                                            float64
-	hardDropFlag, softDropFlag, moveFlag                 bool
-	landFlag, lockDownTimerResetFlag, patternMatchFlag   bool
-	tSpinFlag, miniSpinFlag, backToBackFlag              bool
+	playfield                                          []int
+	bag, nextBag                                       []int
+	stashQueue                                         []int
+	tetriminoX, tetriminoY, ghostX, ghostY             int
+	tetriminoSpawnX, tetriminoSpawnY                   int
+	tetriminoIdx, tetriminoDrct, nextTetriminoIdx      int
+	score, level, bagIdx, comboCounter, lastOp         int
+	softDropLine, hardDropLine                         int
+	fallSpeed                                          float64
+	hardDropFlag, softDropFlag, moveFlag               bool
+	landFlag, lockDownTimerResetFlag, patternMatchFlag bool
+	tSpinFlag, miniSpinFlag, backToBackFlag            bool
 
 	// io utils
 	inputCh  chan int
@@ -173,7 +174,8 @@ func (gm *GameManager) reload() {
 	gm.score = defaultScore
 	gm.level = gm.difficulty
 	gm.comboCounter = -1
-	gm.dropLine = 0
+	gm.softDropLine = 0
+	gm.hardDropLine = 0
 	gm.calcFallSpeed()
 }
 
@@ -227,7 +229,7 @@ func (gm *GameManager) calcGhostPos() {
 	if gm.landFlag {
 		return
 	}
-	for true {
+	for {
 		gm.ghostY--
 		for i := tetriminoShapes[gm.tetriminoIdx][gm.tetriminoDrct]; i != 0; i >>= tetriNum {
 			x, y := gm.calcGhostMinoPosOnBoard(i)
@@ -286,30 +288,35 @@ func (gm *GameManager) checkLanding() {
 	gm.landFlag = false
 }
 
+// 0x3 = 0b0011
+// 0x6 = 0b0110
+// 0x9 = 0b1001
+// 0xC = 0b1100
 func (gm *GameManager) checkTSpin() {
-	gm.tSpinFlag, gm.miniSpinFlag = false, false
+	gm.tSpinFlag, gm.miniSpinFlag = false, true
 	if gm.tetriminoIdx != tetriminoShapeT ||
 		(gm.lastOp != rotateClockwise &&
 			gm.lastOp != rotateCounterClockwise) {
 		return
 	}
-	blockedCount := 0
+	blockedCount, blockedBitFlag := 0, 0
 	for i := tSpinCheckMino; i != 0; i >>= tetriNum {
 		x, y := gm.calcMinoPosOnBoard(i)
 		if !gm.checkBorderX(x) || !gm.checkBorderY(y) || gm.playfield[x+y*gm.width] != 0 {
-			blockedCount |= 1
+			blockedBitFlag |= 1
+			blockedCount++
 		}
-		blockedCount <<= 1
+		blockedBitFlag <<= 1
 	}
-	blockedCount &= blockedCount >> 12
 	if blockedCount >= 3 {
 		gm.tSpinFlag = true
 	}
-	for i := 0; i < gm.tetriminoDrct; i++ {
-		blockedCount
-	}
-	if blockedCount == 4 || true {
-		gm.miniSpinFlag = true
+
+	if (gm.tetriminoDrct == 0 && blockedBitFlag&0xC == 0xC && blockedBitFlag&0x3 > 0) ||
+		(gm.tetriminoDrct == 1 && blockedBitFlag&0x6 == 0x6 && blockedBitFlag&0x9 > 0) ||
+		(gm.tetriminoDrct == 2 && blockedBitFlag&0x3 == 0x3 && blockedBitFlag&0xC > 0) ||
+		(gm.tetriminoDrct == 3 && blockedBitFlag&0x9 == 0x9 && blockedBitFlag&0x6 > 0) {
+		gm.miniSpinFlag = false
 	}
 }
 
@@ -419,8 +426,9 @@ func (gm *GameManager) softDrop() {
 
 func (gm *GameManager) hardDrop() {
 	gm.lastOp = hardDrop
-	gm.tetriminoX, gm.tetriminoY = gm.ghostX, gm.ghostY
+	gm.hardDropLine = gm.tetriminoY - gm.ghostY
 	gm.hardDropFlag = true
+	gm.tetriminoX, gm.tetriminoY = gm.ghostX, gm.ghostY
 }
 
 // ============ Running Flowchart ================
@@ -436,7 +444,11 @@ func (gm *GameManager) generationPhase() bool {
 	gm.calcGhostPos()
 	gm.moveFlag = true
 	gm.renderOutput()
-	return gm.checkNoCollision() || gm.allowBlockOut
+	if !gm.checkNoCollision() && !gm.allowBlockOut {
+		panic("block")
+		return false
+	}
+	return true
 }
 
 func (gm *GameManager) fallingPhase() {
@@ -455,6 +467,9 @@ func (gm *GameManager) fallingPhase() {
 		gm.tetriminoY--
 		gm.renderOutput()
 		gm.checkLanding()
+		if gm.softDropFlag {
+			gm.softDropLine++
+		}
 	}
 }
 
@@ -479,6 +494,7 @@ func (gm *GameManager) lockPhase() bool {
 		return false
 	}
 	gm.lockDown() // Lock down this tetrimino
+	gm.checkTSpin()
 	return true
 }
 
@@ -530,7 +546,29 @@ func (gm *GameManager) elimatePhase() {
 		}
 	}
 	// TODO: GameManager Statistics
+	actionTotal := 0
+	lineOnlyRatio := []int{0, 100, 300, 500, 800}
+	miniTSpinRatio := []int{100, 200}
+	tSpinRatio := []int{400, 800, 1200, 1600}
 
+	if !gm.tSpinFlag {
+		actionTotal = gm.level * lineOnlyRatio[clearLineCount]
+	} else if gm.miniSpinFlag {
+		actionTotal = gm.level * miniTSpinRatio[clearLineCount]
+	} else {
+		actionTotal = gm.level * tSpinRatio[clearLineCount]
+	}
+
+	if gm.backToBackFlag {
+		actionTotal = actionTotal + actionTotal/2
+	}
+
+	actionTotal += gm.softDropLine + gm.hardDropLine*2
+
+	gm.score += actionTotal
+
+	// Reset Droplines
+	gm.softDropLine, gm.hardDropLine = 0, 0
 	// Reset Back-to-Back flag
 	if clearLineCount == 4 || gm.tSpinFlag {
 		gm.backToBackFlag = true

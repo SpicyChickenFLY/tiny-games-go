@@ -60,10 +60,10 @@ func RenderToScreen(playfield, next []int, height, width, score int) {
 		for j := 0; j < width; j++ {
 			if playfield[i*width+j] > 0 {
 				// tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
-				tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorBlack, "⬛")
+				tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorBlack, "◼")
 			} else {
 				// tbprint(j*2, height-i, termbox.ColorBlack, colorMap[playfield[i*width+j]*-1], fmt.Sprint(playfield[i*width+j]))
-				tbprint(j*2, height-i, termbox.ColorBlack, colorMap[playfield[i*width+j]*-1], "⬛")
+				tbprint(j*2, height-i, termbox.ColorBlack, colorMap[playfield[i*width+j]*-1], "◼")
 			}
 
 		}
@@ -72,7 +72,7 @@ func RenderToScreen(playfield, next []int, height, width, score int) {
 	for i := 0; i < tetriNum; i++ {
 		for j := 0; j < tetriNum; j++ {
 			// tbprint(j*2, height-i, colorMap[playfield[i*width+j]], termbox.ColorDefault, fmt.Sprint(playfield[i*width+j]))
-			tbprint(22+j*2, 2+i, colorMap[next[i*tetriNum+j]], termbox.ColorBlack, "⬛")
+			tbprint(22+j*2, 2+i, colorMap[next[i*tetriNum+j]], termbox.ColorBlack, "◼")
 
 		}
 
