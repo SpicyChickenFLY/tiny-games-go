@@ -115,30 +115,30 @@ type GameManager struct {
 	allowTopOut, allowLockOut, allowBlockOut   bool
 
 	// game internal variables(can not be modified by user)
-	playfield                                          []int
-	bag, nextBag                                       []int
-	stashQueue                                         []int
-	tetriminoX, tetriminoY, ghostX, ghostY             int
-	tetriminoSpawnX, tetriminoSpawnY                   int
-	tetriminoIdx, tetriminoDrct, nextTetriminoIdx      int
-	bagIdx, comboCounter, lastOp                       int
-	softDropLine, hardDropLine                         int
+	playfield                                                []int
+	bag, nextBag                                             []int
+	stashQueue                                               []int
+	tetriminoX, tetriminoY, tetriminoSpawnX, tetriminoSpawnY int
+	tetriminoIdx, tetriminoDrct, nextTetriminoIdx            int
+	ghostX, ghostY, bagIdx, lastOp                           int
+	softDropLine, hardDropLine, score, highScore, level      int
+	tSpinCount, tetrisCount, comboCount                      int
+	// tpm, lpm                                                 int
 	fallSpeed                                          float64
 	hardDropFlag, softDropFlag, moveFlag               bool
 	landFlag, lockDownTimerResetFlag, patternMatchFlag bool
 	tSpinFlag, miniSpinFlag, backToBackFlag            bool
-
-	// game variables could be exported
-	score, highScore, level, timeElapsed          int
-	tSpinCount, tetrisCount, comboCount, tpm, lpm int
+	startTime                                          time.Time
 
 	// io utils
 	inputCh  chan int
-	renderer func(playfield, next []int, height, width, score int)
+	renderer func(playfield, next []int, height, width, score, highScore, level,
+		tSpinCount, tetrisCount, comboCount int)
 }
 
 // NewGameManager return *GameManager
-func NewGameManager(inputCh chan int, renderer func(playfield, next []int, height, width, score int)) *GameManager {
+func NewGameManager(inputCh chan int, renderer func(playfield, next []int, height, width, score, highScore, level,
+	tSpinCount, tetrisCount, comboCount int)) *GameManager {
 	return &GameManager{
 		difficulty:              defaultDifficulty,
 		lockDownDelay:           defaultLockDownDelay,
@@ -175,11 +175,13 @@ func (gm *GameManager) reload() {
 	gm.bagIdx = len(gm.bag)
 	gm.useBagSystem()
 	gm.stashQueue = make([]int, gm.stashQueueCap)
-	gm.score = defaultScore
-	gm.level = gm.difficulty
-	gm.comboCounter = -1
+
 	gm.softDropLine = 0
 	gm.hardDropLine = 0
+	gm.score = 0
+	gm.tSpinCount = 0
+	gm.tetrisCount = 0
+	gm.comboCount = -1
 	gm.calcFallSpeed()
 }
 
@@ -315,6 +317,7 @@ func (gm *GameManager) checkTSpin() {
 	}
 	if blockedCount >= 3 {
 		gm.tSpinFlag = true
+		gm.tSpinCount++
 	}
 
 	if (gm.tetriminoDrct == 0 && blockedBitFlag&0xC == 0xC && blockedBitFlag&0x3 > 0) ||
@@ -626,6 +629,7 @@ func (gm *GameManager) processInput() {
 }
 
 func (gm *GameManager) renderOutput() {
+	// Middle Panel
 	playfield := make([]int, gm.width*gm.height)
 	for i := 0; i < len(playfield); i++ {
 		playfield[i] = gm.playfield[i]
@@ -646,13 +650,22 @@ func (gm *GameManager) renderOutput() {
 
 		nextTetrimino[0][i&15] = gm.nextTetriminoIdx + 1
 	}
-	// Left
+	// Left panel
 	//   score, time, lines, level, goal, tetrises, tspins, combos, TPM, LPM
+	// Right Panel
 
-	gm.renderer(playfield, nextTetrimino[0], gm.height, gm.width, gm.score)
+	gm.renderer(
+		playfield, nextTetrimino[0], gm.height, gm.width,
+		gm.score, gm.highScore, gm.level,
+		gm.tSpinCount, gm.tetrisCount, gm.comboCount,
+	)
 }
 
 // ============= Export Function ===============
+
+func (gm *GameManager) LoadHighScore(highScore int) {
+	gm.highScore = highScore
+}
 
 // GetSetups of game manager
 func (gm *GameManager) GetSetups() {}
@@ -667,6 +680,7 @@ func (gm *GameManager) RestoreDefaultSetup() {}
 // GameManager Over condition occurs in Generation Phase and Lock Phase
 func (gm *GameManager) NewGame() {
 	gm.reload()
+	gm.startTime = time.Now()
 	// Tetris engine flowchart
 	gm.loopFlow()
 	// GameManager Over Events

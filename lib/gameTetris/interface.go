@@ -52,7 +52,8 @@ func ListenToInput(inputCh chan int) {
 	}
 }
 
-func RenderToScreen(playfield, next []int, height, width, score int) {
+func RenderToScreen(playfield, next []int, height, width, score, highScore, level,
+	tSpinCount, tetrisCount, comboCount int) {
 	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
 		panic(err)
 	}
