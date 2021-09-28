@@ -121,12 +121,16 @@ type GameManager struct {
 	tetriminoX, tetriminoY, ghostX, ghostY             int
 	tetriminoSpawnX, tetriminoSpawnY                   int
 	tetriminoIdx, tetriminoDrct, nextTetriminoIdx      int
-	score, level, bagIdx, comboCounter, lastOp         int
+	bagIdx, comboCounter, lastOp                       int
 	softDropLine, hardDropLine                         int
 	fallSpeed                                          float64
 	hardDropFlag, softDropFlag, moveFlag               bool
 	landFlag, lockDownTimerResetFlag, patternMatchFlag bool
 	tSpinFlag, miniSpinFlag, backToBackFlag            bool
+
+	// game variables could be exported
+	score, highScore, level, timeElapsed          int
+	tSpinCount, tetrisCount, comboCount, tpm, lpm int
 
 	// io utils
 	inputCh  chan int
@@ -252,6 +256,7 @@ func (gm *GameManager) calcDropSpeed() {
 	gm.calcFallSpeed()
 	gm.fallSpeed = gm.fallSpeed / gm.dropSpeedRatio
 }
+
 func (gm *GameManager) checkBorderX(x int) bool {
 	return x >= 0 && x < gm.width
 }
@@ -442,13 +447,8 @@ func (gm *GameManager) generationPhase() bool {
 	gm.tetriminoY = gm.tetriminoSpawnY
 	gm.tetriminoDrct = 0
 	gm.calcGhostPos()
-	gm.moveFlag = true
 	gm.renderOutput()
-	if !gm.checkNoCollision() && !gm.allowBlockOut {
-		panic("block")
-		return false
-	}
-	return true
+	return gm.checkNoCollision() || gm.allowBlockOut
 }
 
 func (gm *GameManager) fallingPhase() {
@@ -586,10 +586,13 @@ func (gm *GameManager) completionPhase() {
 // Tetris engine flowchart
 func (gm *GameManager) loopFlow() {
 	for gm.generationPhase() {
-		for gm.moveFlag && !gm.landFlag {
+		for {
 			gm.fallingPhase()
 			if !gm.lockPhase() {
 				return
+			}
+			if !gm.moveFlag || gm.landFlag {
+				break
 			}
 		}
 		gm.patternPhase()
@@ -643,6 +646,8 @@ func (gm *GameManager) renderOutput() {
 
 		nextTetrimino[0][i&15] = gm.nextTetriminoIdx + 1
 	}
+	// Left
+	//   score, time, lines, level, goal, tetrises, tspins, combos, TPM, LPM
 
 	gm.renderer(playfield, nextTetrimino[0], gm.height, gm.width, gm.score)
 }
