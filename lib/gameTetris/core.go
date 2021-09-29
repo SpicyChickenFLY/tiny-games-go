@@ -548,7 +548,7 @@ func (gm *GameManager) elimatePhase() {
 			}
 		}
 	}
-	// TODO: GameManager Statistics
+	// GameManager Statistics
 	actionTotal := 0
 	lineOnlyRatio := []int{0, 100, 300, 500, 800}
 	miniTSpinRatio := []int{100, 200}
@@ -569,6 +569,16 @@ func (gm *GameManager) elimatePhase() {
 	actionTotal += gm.softDropLine + gm.hardDropLine*2
 
 	gm.score += actionTotal
+
+	if clearLineCount > 0 {
+		gm.comboCount++
+	} else {
+		gm.comboCount = -1
+	}
+
+	if clearLineCount == 4 {
+		gm.tetrisCount++
+	}
 
 	// Reset Droplines
 	gm.softDropLine, gm.hardDropLine = 0, 0
