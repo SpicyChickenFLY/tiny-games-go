@@ -19,6 +19,8 @@ var colorMap = []termbox.Attribute{
 }
 
 //  =================== Utils ===================
+
+// ListenToInput listen all input event and push into channel
 func ListenToInput(inputCh chan int) {
 	termbox.SetInputMode(termbox.InputEsc)
 	for {
@@ -52,6 +54,7 @@ func ListenToInput(inputCh chan int) {
 	}
 }
 
+// RenderToScreen render game infomation to screen
 func RenderToScreen(playfield, next []int, height, width, score, highScore, level,
 	tSpinCount, tetrisCount, comboCount int) {
 	if err := termbox.Clear(termbox.ColorDefault, termbox.ColorDefault); err != nil {
