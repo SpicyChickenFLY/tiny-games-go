@@ -506,7 +506,6 @@ func (gm *GameManager) patternPhase() {
 	gm.patternMatchFlag = false
 	count := gm.width
 	for i := 0; i < len(gm.playfield); i++ {
-		// TODO: judge T-spin
 		if i%gm.width == 0 { // row head
 			if count == 0 {
 				gm.patternMatchFlag = true
