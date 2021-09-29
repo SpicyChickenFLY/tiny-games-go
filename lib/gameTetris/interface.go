@@ -78,7 +78,13 @@ func RenderToScreen(playfield, next []int, height, width, score, highScore, leve
 		}
 
 	}
-	tbprint(22, 6, termbox.ColorRed, termbox.ColorDefault, fmt.Sprintf("score: %8d", score))
+	tbprint(22, 6, termbox.ColorWhite, termbox.ColorDefault, fmt.Sprintf("Hight Score: %8d", highScore))
+	tbprint(22, 7, termbox.ColorCyan, termbox.ColorDefault, fmt.Sprintf("Score: %8d", score))
+	tbprint(22, 8, termbox.ColorMagenta, termbox.ColorDefault, fmt.Sprintf("Level: %2d", level))
+	tbprint(22, 9, termbox.ColorBlue, termbox.ColorDefault, fmt.Sprintf("T-Spins: %3d", tSpinCount))
+	tbprint(22, 10, termbox.ColorYellow, termbox.ColorDefault, fmt.Sprintf("Tetrises: %3d", tetrisCount))
+	tbprint(22, 11, termbox.ColorGreen, termbox.ColorDefault, fmt.Sprintf("Combos: %3d", comboCount))
+
 	if err := termbox.Flush(); err != nil {
 		panic(err)
 	}
