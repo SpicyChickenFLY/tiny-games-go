@@ -137,8 +137,12 @@ type GameManager struct {
 }
 
 // NewGameManager return *GameManager
-func NewGameManager(inputCh chan int, renderer func(playfield, next []int, height, width, score, highScore, level,
-	tSpinCount, tetrisCount, comboCount int)) *GameManager {
+func NewGameManager(
+	inputCh chan int,
+	renderer func(
+		playfield, next []int, height, width, score, highScore, level,
+		tSpinCount, tetrisCount, comboCount int),
+) *GameManager {
 	return &GameManager{
 		difficulty:              defaultDifficulty,
 		lockDownDelay:           defaultLockDownDelay,
@@ -295,6 +299,9 @@ func (gm *GameManager) checkLanding() {
 	gm.landFlag = false
 }
 
+// set postion flag in binary format
+// 0b        0          0          0          0
+// Binary    LeftTop    RightTop   LeftBottom RightBottom
 // 0x3 = 0b0011
 // 0x6 = 0b0110
 // 0x9 = 0b1001
@@ -525,7 +532,7 @@ func (gm *GameManager) patternPhase() {
 // this phase is for more variants (not used for now)
 func (gm *GameManager) iteratePhase() {}
 
-// this phase consumes no apparent game time (gm.renderOutput())
+// this phase consumes no apparent game time (not used for now)
 func (gm *GameManager) animatePhase() {}
 
 func (gm *GameManager) elimatePhase() {
@@ -672,6 +679,7 @@ func (gm *GameManager) renderOutput() {
 
 // ============= Export Function ===============
 
+// LoadHighScore (maybe from file or network)
 func (gm *GameManager) LoadHighScore(highScore int) {
 	gm.highScore = highScore
 }
